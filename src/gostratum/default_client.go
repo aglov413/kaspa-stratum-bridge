@@ -53,6 +53,7 @@ func DefaultHandlers() StratumHandlerMap {
 	}
 }
 
+// v0.1 canxium-patch
 func HandleAuthorize(ctx *StratumContext, event JsonRpcEvent) error {
 	if len(event.Params) < 1 {
 		return fmt.Errorf("malformed event from miner, expected param[1] to be address")
@@ -61,12 +62,20 @@ func HandleAuthorize(ctx *StratumContext, event JsonRpcEvent) error {
 	if !ok {
 		return fmt.Errorf("malformed event from miner, expected param[1] to be address string")
 	}
+
 	parts := strings.Split(address, ".")
 	var workerName string
+	var canxiumAddress string
+
 	if len(parts) >= 2 {
 		address = parts[0]
 		workerName = parts[1]
+
+		if len(parts) >= 3 {
+			canxiumAddress = ProcessCanxiumAddress(parts[2])
+		}
 	}
+
 	var err error
 	address, err = CleanWallet(address)
 	if err != nil {
@@ -75,17 +84,51 @@ func HandleAuthorize(ctx *StratumContext, event JsonRpcEvent) error {
 
 	ctx.WalletAddr = address
 	ctx.WorkerName = workerName
-	ctx.Logger = ctx.Logger.With(zap.String("worker", ctx.WorkerName), zap.String("addr", ctx.WalletAddr))
+
+	if canxiumAddress != "" {
+		ctx.CanxiumAddr = canxiumAddress
+	}
+
+	loggerWithFields := ctx.Logger.With(zap.String("worker", ctx.WorkerName), zap.String("addr", ctx.WalletAddr))
+	if canxiumAddress != "" {
+		loggerWithFields = loggerWithFields.With(zap.String("canxium_addr", ctx.CanxiumAddr))
+	}
+	ctx.Logger = loggerWithFields
 
 	if err := ctx.Reply(NewResponse(event, true, nil)); err != nil {
 		return errors.Wrap(err, "failed to send response to authorize")
 	}
+
 	if ctx.Extranonce != "" {
 		SendExtranonce(ctx)
 	}
 
-	ctx.Logger.Info(fmt.Sprintf("client authorized, address: %s", ctx.WalletAddr))
+	logMessage := fmt.Sprintf("client authorized, address: %s", ctx.WalletAddr)
+	if canxiumAddress != "" {
+		logMessage += fmt.Sprintf(", canxium address: %s", ctx.CanxiumAddr)
+	}
+	ctx.Logger.Info(logMessage)
+
 	return nil
+}
+
+func ProcessCanxiumAddress(address string) string {
+	// Remove 0x prefix if present
+	if strings.HasPrefix(address, "0x") {
+		address = address[2:]
+	} else if strings.HasPrefix(strings.ToLower(address), "canxiuminer:0x") {
+		// If it has both prefixes, remove the 0x part
+		prefix := address[:len("canxiuminer:")]
+		addressPart := address[len("canxiuminer:0x"):]
+		address = prefix + addressPart
+	}
+
+	// Make sure the address has the canxiuminer: prefix
+	if !strings.HasPrefix(strings.ToLower(address), "canxiuminer:") {
+		address = "canxiuminer:" + address
+	}
+
+	return address
 }
 
 func HandleSubscribe(ctx *StratumContext, event JsonRpcEvent) error {

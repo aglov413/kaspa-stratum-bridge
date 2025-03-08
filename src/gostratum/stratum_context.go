@@ -19,6 +19,7 @@ type StratumContext struct {
 	RemotePort    int
 	WalletAddr    string
 	WorkerName    string
+        CanxiumAddr  string
 	RemoteApp     string
 	Id            int32
 	Logger        *zap.Logger
