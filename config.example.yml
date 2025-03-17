@@ -1,23 +1,23 @@
 # Kaspa Stratum Bridge Configuration Example
 
 # Stratum server settings
-stratum_port: ":5555"  # Port for stratum server to listen on
+stratum_port: ":35555"  # Port for stratum server to listen on
 kaspad_address: "127.0.0.1:16110"  # Kaspad RPC server address
 
 # Monitoring settings
 prom_port: ":2114"  # Prometheus metrics port
 print_stats: true  # Print mining statistics to console
 log_to_file: true  # Log to file instead of console
-health_check_port: ":8080"  # Health check endpoint port
+health_check_port: ":18080"  # Health check endpoint port
 
 # Mining settings
 block_wait_time: 2s  # Time to wait between block template updates
-min_share_diff: 8192  # Minimum share difficulty
+min_share_diff: 4  # Minimum share difficulty
 var_diff: true  # Enable variable difficulty
 shares_per_min: 20  # Target shares per minute for vardiff
-var_diff_stats: false  # Print vardiff statistics
-extranonce_size: 0  # Size of extranonce (max 3)
-pow2_clamp: false  # Clamp difficulty to power of 2
+var_diff_stats: true  # Print vardiff statistics
+extranonce_size: 2  # Size of extranonce (max 3)
+pow2_clamp: true  # Clamp difficulty to power of 2
 
 # RPC Pool Configuration
 rpc_pool_config:

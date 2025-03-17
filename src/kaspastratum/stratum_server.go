@@ -15,23 +15,25 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-const version = "v1.2.2"
+const version = "v2.0.2"
 const minBlockWaitTime = 3 * time.Second
+const defaultPoolSize = 3
 
 type BridgeConfig struct {
-	StratumPort     string        `yaml:"stratum_port"`
-	RPCServer       string        `yaml:"kaspad_address"`
-	PromPort        string        `yaml:"prom_port"`
-	PrintStats      bool          `yaml:"print_stats"`
-	UseLogFile      bool          `yaml:"log_to_file"`
-	HealthCheckPort string        `yaml:"health_check_port"`
-	BlockWaitTime   time.Duration `yaml:"block_wait_time"`
-	MinShareDiff    uint          `yaml:"min_share_diff"`
-	VarDiff         bool          `yaml:"var_diff"`
-	SharesPerMin    uint          `yaml:"shares_per_min"`
-	VarDiffStats    bool          `yaml:"var_diff_stats"`
-	ExtranonceSize  uint          `yaml:"extranonce_size"`
-	ClampPow2       bool          `yaml:"pow2_clamp"`
+	StratumPort      string        `yaml:"stratum_port"`
+	RPCServer        string        `yaml:"kaspad_address"`
+	PromPort         string        `yaml:"prom_port"`
+	PrintStats       bool          `yaml:"print_stats"`
+	UseLogFile       bool          `yaml:"log_to_file"`
+	HealthCheckPort  string        `yaml:"health_check_port"`
+	BlockWaitTime    time.Duration `yaml:"block_wait_time"`
+	MinShareDiff     float64         `yaml:"min_share_diff"`
+	VarDiff          bool          `yaml:"var_diff"`
+	SharesPerMin     uint          `yaml:"shares_per_min"`
+	VarDiffStats     bool          `yaml:"var_diff_stats"`
+	ExtranonceSize  int             `yaml:"extranonce_size"`
+	ClampPow2        bool          `yaml:"pow2_clamp"`
+	RPCPoolConfig    RPCConfig       `yaml:"rpc_pool_config"`
 }
 
 func configureZap(cfg BridgeConfig) (*zap.SugaredLogger, func()) {
@@ -72,10 +74,28 @@ func ListenAndServe(cfg BridgeConfig) error {
 	if blockWaitTime == 0 {
 		blockWaitTime = minBlockWaitTime
 	}
-	ksApi, err := NewKaspaAPI(cfg.RPCServer, blockWaitTime, logger)
+
+	// Set default RPC pool configuration if not provided
+	if cfg.RPCPoolConfig.PoolSize == 0 {
+		cfg.RPCPoolConfig.PoolSize = defaultPoolSize
+	}
+	if cfg.RPCPoolConfig.HealthCheckInterval == 0 {
+		cfg.RPCPoolConfig.HealthCheckInterval = time.Second * 30
+	}
+	if cfg.RPCPoolConfig.ReconnectDelay == 0 {
+		cfg.RPCPoolConfig.ReconnectDelay = time.Second * 5
+	}
+
+	logger.Info("RPC Pool Configuration",
+		zap.Int("pool_size", cfg.RPCPoolConfig.PoolSize),
+		zap.Duration("health_check_interval", cfg.RPCPoolConfig.HealthCheckInterval),
+		zap.Duration("reconnect_delay", cfg.RPCPoolConfig.ReconnectDelay))
+
+	ksApi, err := NewKaspaAPI(cfg.RPCServer, blockWaitTime, logger, cfg.RPCPoolConfig)
 	if err != nil {
 		return err
 	}
+	defer ksApi.Close()
 
 	if cfg.HealthCheckPort != "" {
 		logger.Info("enabling health check on port " + cfg.HealthCheckPort)
@@ -85,7 +105,7 @@ func ListenAndServe(cfg BridgeConfig) error {
 		go http.ListenAndServe(cfg.HealthCheckPort, nil)
 	}
 
-	shareHandler := newShareHandler(ksApi.kaspad)
+	shareHandler := newShareHandler(ksApi.rpcPool)
 	minDiff := float64(cfg.MinShareDiff)
 	if minDiff == 0 {
 		minDiff = 4
@@ -136,5 +156,5 @@ func ListenAndServe(cfg BridgeConfig) error {
 
 	go shareHandler.startPruneStatsThread()
 
-	return gostratum.NewListener(stratumConfig).Listen(context.Background())
+	return gostratum.NewListener(stratumConfig).Listen(ctx)
 }

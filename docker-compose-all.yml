@@ -14,6 +14,10 @@ services:
       - '-kaspa=host.docker.internal:16110'
       - '-mindiff=64'
       - '-vardiff=true'
+      # RPC Pool Configuration
+      - '-rpc-pool-size=3'
+      - '-rpc-health-check=30s'
+      - '-rpc-reconnect-delay=5s'
     ports:
       - 5555:5555
       - 2114:2114

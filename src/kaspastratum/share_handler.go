@@ -1,6 +1,7 @@
 package kaspastratum
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -41,18 +42,18 @@ type WorkStats struct {
 }
 
 type shareHandler struct {
-	kaspa        *rpcclient.RPCClient
-	stats        map[string]*WorkStats
-	statsLock    sync.Mutex
-	overall      WorkStats
+	rpcPool     *RPCClientPool
+	stats       map[string]*WorkStats
+	statsLock   sync.Mutex
+	overall     WorkStats
 	tipBlueScore uint64
 }
 
-func newShareHandler(kaspa *rpcclient.RPCClient) *shareHandler {
+func newShareHandler(rpcPool *RPCClientPool) *shareHandler {
 	return &shareHandler{
-		kaspa:     kaspa,
-		stats:     map[string]*WorkStats{},
-		statsLock: sync.Mutex{},
+		rpcPool:     rpcPool,
+		stats:       map[string]*WorkStats{},
+		statsLock:   sync.Mutex{},
 	}
 }
 
@@ -284,16 +285,65 @@ func (sh *shareHandler) submit(ctx *gostratum.StratumContext,
 		Header:       mutable.ToImmutable(),
 		Transactions: block.Transactions,
 	}
-	_, err := sh.kaspa.SubmitBlock(block)
+
+	// Get client from pool with retries
+	var client *rpcclient.RPCClient
+	var err error
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		client = sh.rpcPool.GetClient()
+		if client != nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond) // Short delay between retries
+		RecordBlockSubmissionRetry(i)
+	}
+
+	if client == nil {
+		RecordWorkerError(ctx.WalletAddr, "no_healthy_rpc_clients")
+		return errors.New("no healthy RPC clients available")
+	}
+
+	// Submit block with timeout
+	submitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Create channel for result
+	resultChan := make(chan error, 1)
+	go func() {
+		start := time.Now()
+		_, err := client.SubmitBlock(block)
+		duration := time.Since(start)
+
+		if err != nil {
+			RecordBlockSubmissionFailure(client, err)
+			resultChan <- err
+		} else {
+			RecordBlockSubmissionSuccess(client, duration)
+			resultChan <- nil
+		}
+	}()
+
+	// Wait for result or timeout
+	select {
+	case err := <-resultChan:
+		if err != nil {
+			RecordWorkerError(ctx.WalletAddr, "submit_block_failed")
+			return errors.Wrap(err, "failed submitting block to kaspad")
+		}
+	case <-submitCtx.Done():
+		RecordBlockSubmissionTimeout(client)
+		RecordWorkerError(ctx.WalletAddr, "submit_block_timeout")
+		return errors.New("block submission timed out")
+	}
+
 	blockhash := consensushashing.BlockHash(block)
-	// print after the submit to get it submitted faster
 	ctx.Logger.Info(fmt.Sprintf("Submitted block %s", blockhash))
 
+	// Handle specific error cases
 	if err != nil {
-		// :'(
 		if strings.Contains(err.Error(), "ErrDuplicateBlock") {
 			ctx.Logger.Warn("block rejected, stale")
-			// stale
 			sh.getCreateStats(ctx).StaleShares.Add(1)
 			sh.overall.StaleShares.Add(1)
 			RecordStaleShare(ctx)
@@ -307,15 +357,13 @@ func (sh *shareHandler) submit(ctx *gostratum.StratumContext,
 		}
 	}
 
-	// :)
+	// Success case
 	ctx.Logger.Info(fmt.Sprintf("block accepted %s", blockhash))
 	stats := sh.getCreateStats(ctx)
 	stats.BlocksFound.Add(1)
 	sh.overall.BlocksFound.Add(1)
 	RecordBlockFound(ctx, block.Header.Nonce(), block.Header.BlueScore(), blockhash.String())
 
-	// nil return allows HandleSubmit to record share (blocks are shares too!)
-	// and handle the response to the client
 	return nil
 }
 
@@ -512,7 +560,7 @@ func updateVarDiff(stats *WorkStats, minDiff float64, clamp bool) float64 {
 	}
 
 	previousMinDiff := stats.MinDiff.Load()
-	newMinDiff := math.Max(0.125, minDiff)
+	newMinDiff := math.Max(0.065, minDiff)
 	if newMinDiff != previousMinDiff {
 		log.Printf("updating vardiff to %f for client %s", newMinDiff, stats.WorkerName)
 		stats.VarDiffStartTime = time.Time{}

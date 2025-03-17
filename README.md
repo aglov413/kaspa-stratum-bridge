@@ -123,8 +123,7 @@ Many of the stats on the graph are averaged over a configurable time period (24h
 
 Configuration for the bridge is done via the [config.yaml](cmd/kaspabridge/config.yaml) file in the same directory as the executable, or `./cmd/kaspabridge` from the project root if building from source / using docker.  Available parameters are as follows:
 
-
-```
+```yaml
 # stratum_listen_port: the port that will be listening for incoming stratum 
 # traffic
 # Note `:PORT` format is needed if not specifiying a specific ip range 
@@ -211,11 +210,28 @@ log_to_file: true
 # Note `:PORT` format is needed if not specifiying a specific ip range 
 prom_port: :2114
 
+# RPC Pool Configuration
+# rpc_pool_config: settings for the RPC connection pool
+rpc_pool_config:
+  # pool_size: number of RPC connections to maintain in the pool
+  # Higher values provide better reliability and load distribution
+  # but consume more resources. Default is 3.
+  pool_size: 3
+
+  # health_check_interval: how often to check the health of RPC connections
+  # Format: time duration (e.g., '30s', '1m', '5m')
+  # Default is 30 seconds
+  health_check_interval: 30s
+
+  # reconnect_delay: delay between reconnection attempts for failed RPC connections
+  # Format: time duration (e.g., '5s', '10s', '30s')
+  # Default is 5 seconds
+  reconnect_delay: 5s
 ```
 
-Config parameters can also be specificied by command line flags, which have slightly different names (these would be added in the 'command' subsection of the 'ks_bridge' section of the appropriate 'docker-compose-*.yml' file for docker installations.)  This method has precedence over the config.yaml file:
+Config parameters can also be specified by command line flags, which have slightly different names (these would be added in the 'command' subsection of the 'ks_bridge' section of the appropriate 'docker-compose-*.yml' file for docker installations.) This method has precedence over the config.yaml file:
 
-```
+```yaml
   - '-log=true' # enable/disable logging
   - '-stats=false' # include stats readout every 10s in log
   - '-stratum=:5555' # port to which miners should connect
@@ -229,7 +245,23 @@ Config parameters can also be specificied by command line flags, which have slig
   - '-extranonce=0' # size in bytes of extranonce
   - '-blockwait=3s' # time in to wait before manually requesting new block
   - '-hcp=' # port at which healthcheck is exposed (at path '/readyz')
+  - '-rpc-pool-size=3'  # number of RPC connections to maintain
+  - '-rpc-health-check=30s'  # health check interval
+  - '-rpc-reconnect-delay=5s'  # delay between reconnection attempts
 ```
+
+# RPC Pool Features
+
+The RPC Pool provides several benefits:
+
+1. **High Availability**: Maintains multiple RPC connections to handle failures gracefully
+2. **Load Distribution**: Distributes requests across multiple connections using round-robin
+3. **Automatic Recovery**: Monitors connection health and automatically reconnects failed connections
+4. **Metrics**: Provides detailed metrics about RPC connection health and usage
+   - `kaspa_stratum_rpc_requests_total`: Number of RPC requests per client
+   - `kaspa_stratum_rpc_errors_total`: Number of RPC errors by type
+   - `kaspa_stratum_rpc_reconnects_total`: Number of reconnection attempts
+   - `kaspa_stratum_rpc_healthy_connections`: Current number of healthy connections
 
 ## IceRiver ASICs configuration details
 
