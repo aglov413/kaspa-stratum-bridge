@@ -136,7 +136,7 @@ var (
 
 // max difference between tip blue score and job blue score that we'll accept
 // anything greater than this is considered a stale
-const workWindow = 8
+const workWindow = 80
 
 func (sh *shareHandler) checkStales(ctx *gostratum.StratumContext, si *submitInfo) error {
 	tip := sh.tipBlueScore
