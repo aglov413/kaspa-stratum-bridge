@@ -5,7 +5,7 @@ go 1.23
 require (
 	github.com/google/go-cmp v0.6.0
 	github.com/google/uuid v1.6.0
-	github.com/kaspanet/kaspad v1.9.12-temp-stability-tests.0.20250223130316-352d261fd606
+	github.com/kaspanet/kaspad v0.12.20
 	github.com/mattn/go-colorable v0.1.13
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.13.0

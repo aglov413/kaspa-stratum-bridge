@@ -1,0 +1,78 @@
+name: Build and upload assets
+on:
+  release:
+    types: [ published ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: 'stable'
+
+    - name: Create artifacts
+      run: |
+        CMD_PATH="../cmd/kaspabridge"
+        rm -rf release
+        mkdir -p release
+        cd release
+
+        VERSION="${{ github.event.release.tag_name }}"
+        ARCHIVE="ks_bridge-${VERSION}"
+        OUTFILE="ks_bridge"
+        OUTDIR="ks_bridge"
+
+        mkdir -p ${OUTDIR};env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ${OUTDIR}/${OUTFILE}.exe ${CMD_PATH};cp ${CMD_PATH}/config.yaml ${OUTDIR}/
+        zip -r ${ARCHIVE}.zip ${OUTDIR}
+        rm -rf ${OUTDIR}
+
+        echo "archive_name_win=${ARCHIVE}.zip" >> $GITHUB_ENV
+        echo "asset_name_win=${ARCHIVE}.zip" >> $GITHUB_ENV
+        
+        # linux
+        mkdir -p ${OUTDIR};env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ${OUTDIR}/${OUTFILE} ${CMD_PATH};cp ${CMD_PATH}/config.yaml ${OUTDIR}/
+        tar -czvf ${ARCHIVE}.tar.gz ${OUTDIR}
+
+        echo "archive_name_linux=${ARCHIVE}.tar.gz" >> $GITHUB_ENV
+        echo "asset_name_linux=${ARCHIVE}.tar.gz" >> $GITHUB_ENV
+        
+        # hive
+        cp ../misc/hive/* ${OUTDIR}
+        tar -czvf ${ARCHIVE}_hive.tar.gz ${OUTDIR}
+
+        echo "archive_name_hive=${ARCHIVE}_hive.tar.gz" >> $GITHUB_ENV
+        echo "asset_name_hive=${ARCHIVE}_hive.tar.gz" >> $GITHUB_ENV
+
+    - name: Upload release asset windows
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: "release/${{ env.archive_name_win }}"
+        asset_name: "${{ env.asset_name_win }}"
+        asset_content_type: application/zip
+
+    - name: Upload release asset linux
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: "release/${{ env.archive_name_linux }}"
+        asset_name: "${{ env.asset_name_linux }}"
+        asset_content_type: application/tar+gzip
+
+    - name: Upload release asset hive
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: "release/${{ env.archive_name_hive }}"
+        asset_name: "${{ env.asset_name_hive }}"
+        asset_content_type: application/tar+gzip

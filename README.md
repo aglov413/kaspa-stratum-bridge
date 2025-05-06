@@ -9,6 +9,7 @@ This daemon is confirmed working with the miners below in both kaspa-only and du
 * teamreadminer
 * IceRiver ASICs <font size="1">[*(setup details)*](#iceriver-asics-configuration-details)</font>
 * Bitmain ASICS
+* Goldshell ASICS
 
 Hive setup: [detailed instructions here](docs/hive-setup.md) 
 
@@ -81,7 +82,7 @@ ks_worker_job_counter{ip="192.168.0.65",miner="BzMiner-v11.1.0",wallet="kaspa:qz
 
 ## Option 1: Build from source (native executable)
 
-* Install go 1.18 or later using whatever package manager is approprate for your system, or from https://go.dev/doc/install.
+* Install go 1.23 or later using whatever package manager is approprate for your system, or from https://go.dev/doc/install.
 
 * run `cd cmd/kaspabridge;go build .`
 
@@ -245,5 +246,6 @@ It is recommended to allow the variable difficulty engine to determine the prope
 |KS2    | 1024 |
 |KS3L/M | 2048 |
 |KS3    | 4096 |
+|KS5	| 8192 |
 
 See previous sections for details on setting these parameters for your particular installation.
