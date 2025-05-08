@@ -19,6 +19,7 @@ type MiningState struct {
 	initialized bool
 	useBigJob   bool
 	connectTime time.Time
+	lastJobTime time.Time  // Track when we last sent a job to this miner
 	stratumDiff *kaspaDiff
 	maxJobs     uint16
 }
@@ -28,6 +29,7 @@ func MiningStateGenerator() any {
 		Jobs:        make(map[uint64]*appmessage.RPCBlock, maxjobs),
 		JobLock:     sync.Mutex{},
 		connectTime: time.Now(),
+		lastJobTime: time.Time{},  // Initialize to zero time
 		maxJobs:     maxjobs,
 	}
 }

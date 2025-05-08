@@ -16,7 +16,10 @@ import (
 
 var bigJobRegex = regexp.MustCompile(".*(BzMiner|IceRiverMiner).*")
 
-const balanceDelay = time.Minute
+const (
+	balanceDelay = time.Minute
+	minJobDelay  = 250 * time.Millisecond  // Minimum time between jobs for the same miner
+)
 
 type clientListener struct {
 	logger           *zap.SugaredLogger
@@ -86,33 +89,51 @@ func (c *clientListener) OnDisconnect(ctx *gostratum.StratumContext) {
 func (c *clientListener) NewBlockAvailable(kapi *KaspaApi) {
 	c.clientLock.Lock()
 	addresses := make([]string, 0, len(c.clients))
+	clientcount := 0
 	for _, cl := range c.clients {
 		if !cl.Connected() {
 			continue
 		}
+		if clientcount > 0 {
+			time.Sleep(500 * time.Microsecond)  // delay between different miners GBT
+		}
+		clientcount++
 		go func(client *gostratum.StratumContext) {
 			state := GetMiningState(client)
+
+			// Check if enough time has passed since the last job
+			if time.Since(state.lastJobTime) < minJobDelay {
+				client.Logger.Debug("skipping job - too soon since last job",
+					zap.Duration("timeSinceLastJob", time.Since(state.lastJobTime)),
+					zap.Duration("minDelay", minJobDelay))
+				return
+			}
+
 			if client.WalletAddr == "" {
-				if time.Since(state.connectTime) > time.Second*20 { // timeout passed
-					// this happens pretty frequently in gcp/aws land since script-kiddies scrape ports
+				if time.Since(state.connectTime) > time.Second*20 {
 					client.Logger.Warn("client misconfigured, no miner address specified - disconnecting", zap.String("client", client.String()))
 					RecordWorkerError(client.WalletAddr, ErrNoMinerAddress)
-					client.Disconnect() // invalid configuration, boot the worker
+					client.Disconnect()
 				}
 				return
 			}
+
 			template, err := kapi.GetBlockTemplate(client)
 			if err != nil {
 				if strings.Contains(err.Error(), "Could not decode address") {
 					RecordWorkerError(client.WalletAddr, ErrInvalidAddressFmt)
 					client.Logger.Error(fmt.Sprintf("failed fetching new block template from kaspa, malformed address: %s", err))
-					client.Disconnect() // unrecoverable
+					client.Disconnect()
 				} else {
 					RecordWorkerError(client.WalletAddr, ErrFailedBlockFetch)
 					client.Logger.Error(fmt.Sprintf("failed fetching new block template from kaspa: %s", err))
 				}
 				return
 			}
+
+			// Update last job time before processing the new job
+			state.lastJobTime = time.Now()
+
 			state.bigDiff = CalculateTarget(uint64(template.Block.Header.Bits))
 			header, err := SerializeBlockHeader(template.Block)
 			if err != nil {
@@ -149,7 +170,6 @@ func (c *clientListener) NewBlockAvailable(kapi *KaspaApi) {
 				jobParams = append(jobParams, template.Block.Header.Timestamp)
 			}
 
-			// // normal notify flow
 			if err := client.Send(gostratum.JsonRpcEvent{
 				Version: "2.0",
 				Method:  "mining.notify",
