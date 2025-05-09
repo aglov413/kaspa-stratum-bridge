@@ -3,6 +3,7 @@ package kaspastratum
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kaspanet/kaspad/app/appmessage"
@@ -18,6 +19,7 @@ type KaspaApi struct {
 	logger        *zap.SugaredLogger
 	kaspad        *rpcclient.RPCClient
 	connected     bool
+	connLock      sync.RWMutex
 }
 
 func NewKaspaAPI(address string, blockWaitTime time.Duration, logger *zap.SugaredLogger) (*KaspaApi, error) {
@@ -32,6 +34,7 @@ func NewKaspaAPI(address string, blockWaitTime time.Duration, logger *zap.Sugare
 		logger:        logger.With(zap.String("component", "kaspaapi:"+address)),
 		kaspad:        client,
 		connected:     true,
+		connLock:      sync.RWMutex{},
 	}, nil
 }
 
@@ -64,16 +67,39 @@ func (ks *KaspaApi) startStatsThread(ctx context.Context) {
 	}
 }
 
-func (ks *KaspaApi) reconnect() error {
-	if ks.kaspad != nil {
-		return ks.kaspad.Reconnect()
-	}
+func (ks *KaspaApi) isConnected() bool {
+	ks.connLock.RLock()
+	defer ks.connLock.RUnlock()
+	return ks.connected
+}
 
-	client, err := rpcclient.NewRPCClient(ks.address)
-	if err != nil {
-		return err
+func (ks *KaspaApi) setConnected(connected bool) {
+	ks.connLock.Lock()
+	defer ks.connLock.Unlock()
+	ks.connected = connected
+}
+
+func (ks *KaspaApi) reconnect() error {
+	ks.setConnected(false)
+	if ks.kaspad != nil {
+		err := ks.kaspad.Reconnect()
+		if err != nil {
+			ks.logger.Error("failed to reconnect existing client", zap.Error(err))
+			// Create new client if reconnect fails
+			client, err := rpcclient.NewRPCClient(ks.address)
+			if err != nil {
+				return err
+			}
+			ks.kaspad = client
+		}
+	} else {
+		client, err := rpcclient.NewRPCClient(ks.address)
+		if err != nil {
+			return err
+		}
+		ks.kaspad = client
 	}
-	ks.kaspad = client
+	ks.setConnected(true)
 	return nil
 }
 
@@ -137,9 +163,16 @@ func (s *KaspaApi) startBlockTemplateListener(ctx context.Context, blockReadyCb 
 
 func (ks *KaspaApi) GetBlockTemplate(
 	client *gostratum.StratumContext) (*appmessage.GetBlockTemplateResponseMessage, error) {
+	if !ks.isConnected() {
+		if err := ks.reconnect(); err != nil {
+			return nil, errors.Wrap(err, "failed to reconnect to kaspad")
+		}
+	}
+
 	template, err := ks.kaspad.GetBlockTemplate(client.WalletAddr,
-		fmt.Sprintf(`'%s' via onemorebsmith/kaspa-stratum-bridge_%s`, client.RemoteApp, version))
+            fmt.Sprintf(`'%s' via onemorebsmith/kaspa-stratum-bridge_%s`, client.RemoteApp, version))
 	if err != nil {
+		ks.setConnected(false)
 		return nil, errors.Wrap(err, "failed fetching new block template from kaspa")
 	}
 	return template, nil
