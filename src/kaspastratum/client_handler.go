@@ -29,6 +29,7 @@ type clientListener struct {
 	extranonceSize   int8
 	maxExtranonce    int32
 	nextExtranonce   int32
+        lastTemplateTime time.Time
 }
 
 func newClientListener(logger *zap.SugaredLogger, shareHandler *shareHandler, minShareDiff float64, extranonceSize int8) *clientListener {
@@ -84,12 +85,25 @@ func (c *clientListener) OnDisconnect(ctx *gostratum.StratumContext) {
 }
 
 func (c *clientListener) NewBlockAvailable(kapi *KaspaApi) {
+                    // Add 250ms delay by coderofstuff
+            if c.lastTemplateTime.After(time.Now().Add(-250 * time.Millisecond)) {
+                    // skip templates if new ones arrive within a threshold of the last one sent out
+                    // to not overload the machines with new jobs. KA box pros and some other machines
+                    // are known to have issues with getting jobs too frequently.
+                    return
+            }
+            c.lastTemplateTime = time.Now()
 	c.clientLock.Lock()
 	addresses := make([]string, 0, len(c.clients))
+        clientcount := 0
 	for _, cl := range c.clients {
 		if !cl.Connected() {
 			continue
 		}
+        if clientcount > 0 {
+            time.Sleep(500 * time.Microsecond)
+        }
+        clientcount++
 		go func(client *gostratum.StratumContext) {
 			state := GetMiningState(client)
 			if client.WalletAddr == "" {
